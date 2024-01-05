@@ -134,6 +134,8 @@ struct FormattedToken {
         RParen => ")"
         LCurly => "{"
         RCurly => "}"
+        Indent => ""
+        Dedent => ""
         LSquare => "["
         RSquare => "]"
         PercentSign => "%"

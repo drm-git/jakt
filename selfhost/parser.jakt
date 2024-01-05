@@ -4498,15 +4498,15 @@ struct Parser {
 
         .skip_newlines()
 
-        if .current() is LCurly {
+        if .current() is Indent {
             .index++
         } else {
-            .error("Expected '{'", start)
+            .error("Expected Indent", start)
         }
 
         while not .eof() {
             match .current() {
-                RCurly => {
+                Dedent => {
                     .index++
                     return block
                 }

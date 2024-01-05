@@ -20,6 +20,8 @@ enum Token {
     RParen(Span)
     LCurly(Span)
     RCurly(Span)
+    Indent(Span)
+    Dedent(Span)
     LSquare(Span)
     RSquare(Span)
     PercentSign(Span)
@@ -240,9 +242,16 @@ struct Lexer implements(Iterable<Token>) {
     input: [u8]
     compiler: Compiler
     comment_contents: [u8]?
+    indent_level_history: [usize]
+    current_indent_level: usize
+    is_uninterrupted_from_start_of_line: bool
     illegal_cpp_keywords: {String}
 
     fn lex(compiler: Compiler) -> [Token] {
+        let indent_level_history: [usize] = []
+        let current_indent_level: usize = 0
+        let is_uninterrupted_from_start_of_line:bool = true
+
         let illegal_cpp_keywords: {String} = {
             "alignas",
             "alignof",
@@ -308,7 +317,15 @@ struct Lexer implements(Iterable<Token>) {
             "xor_eq",
         }
 
-        mut lexer = Lexer(index: 0, input: compiler.current_file_contents, compiler, comment_contents: None, illegal_cpp_keywords)
+        mut lexer = Lexer(index: 0,
+            input: compiler.current_file_contents,
+            compiler,
+            comment_contents: None,
+            indent_level_history: indent_level_history,
+            current_indent_level: current_indent_level, 
+            is_uninterrupted_from_start_of_line: is_uninterrupted_from_start_of_line, 
+            illegal_cpp_keywords)
+
         mut tokens: [Token] = []
 
         for token in lexer {
@@ -810,7 +827,13 @@ struct Lexer implements(Iterable<Token>) {
         // reached. For Eof return a token.
         loop {
             if .index == .input.size() {
-                ++.index
+                // Undo any indent levels by injecting dedents
+                // before the EOF
+                if not .indent_level_history.is_empty() {
+                    .indent_level_history.pop()
+                    return Token::Dedent(.span(start: .index, end: .index))
+                }
+                .index++
                 return Token::Eof(.span(start: .index - 1, end: .index - 1))
             }
             // FIXME: Once the handling of Token::Eof is fully implemented,
@@ -821,9 +844,29 @@ struct Lexer implements(Iterable<Token>) {
                 return None
             }
             let ch = .peek()
-            if is_whitespace(ch) {
+            if ch == b'\n' {
+                 // Blank line all the way through, pretend it didn't happen
+                .is_uninterrupted_from_start_of_line = true
+                .current_indent_level = 0
+                return Token::Eol(comment: .consume_comment_contents(), span: .span(start: .index, end: ++.index))
+            }
+            else if is_whitespace(ch) {
+                if .is_uninterrupted_from_start_of_line {
+                    .current_indent_level++
+                }
                 .index++
             } else {
+                if .is_uninterrupted_from_start_of_line {
+                    let previous_indent_level = .indent_level_history.last() ?? 0
+                    if .current_indent_level > previous_indent_level {
+                        .indent_level_history.push(.current_indent_level)
+                    }
+                    else if .current_indent_level < previous_indent_level {
+                        .indent_level_history.pop()
+                        return Token::Dedent(.span(start: .index, end: .index))
+                    }
+                    .is_uninterrupted_from_start_of_line = false
+                }
                 break
             }
         }
@@ -856,7 +899,6 @@ struct Lexer implements(Iterable<Token>) {
             b'&' => .lex_ampersand()
             b'$' => Token::Dollar(.span(start, end: ++.index))
             b'=' => .lex_equals()
-            b'\n' => Token::Eol(comment: .consume_comment_contents(), span: .span(start, end: ++.index))
             b'\'' => .lex_quoted_string(delimiter: b'\'')
             b'\"' => .lex_quoted_string(delimiter: b'"')
             b'b' => .lex_character_constant_or_name()
